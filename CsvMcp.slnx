@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CsvMcp.Server/CsvMcp.Server.csproj" />
+  </Folder>
+</Solution>

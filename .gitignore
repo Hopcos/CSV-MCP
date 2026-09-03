@@ -1,0 +1,40 @@
+# ===== Build output =====
+bin/
+obj/
+publish/
+artifacts/
+
+# ===== IDE / editor =====
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# ===== Runtime data (generated CSV files, sidecar metadata, temp staging files) =====
+data/
+
+# ===== Temporary files =====
+*.tmp
+*.temp
+*.staging
+*.bak
+*.orig
+*.swp
+*~
+tmp/
+
+# ===== Logs =====
+logs/
+*.log
+
+# ===== OS noise =====
+Thumbs.db
+.DS_Store
+
+# ===== NuGet =====
+packages/
+*.nupkg
+
+# ===== Decompiler / scratch outputs =====
+*.decompiled.cs
