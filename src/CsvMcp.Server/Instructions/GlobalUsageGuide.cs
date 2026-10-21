@@ -204,7 +204,7 @@ public static class GlobalUsageGuide
         markdown.AppendLine("## Configuration knobs the agent should know");
         markdown.AppendLine();
         markdown.AppendLine("- Files are stored under the data directory (default `data/csv`), git-ignored, one file per `fileId` plus a `.meta.json` sidecar.");
-        markdown.AppendLine("- Limits: `MaxRowsPerFile` (default 1,000,000), `MaxColumns` (default 10,000), `MaxCellLength` (default 1,000,000 chars), `MaxFileSizeBytes` (default 50 MB), inline base64 downloads up to `MaxBase64DownloadBytes` (default 5 MB).");
+        markdown.AppendLine("- Limits: `MaxRowsPerFile` (default 1,000,000), `MaxColumns` (default 10,000), `MaxCellLength` (default 1,000,000 chars), `MaxFileSizeBytes` (default 50 MB), `MaxAppendBytes` (default 1,000,000 bytes — the most any single `append_csv_rows` call may add; split larger payloads across calls), inline base64 downloads up to `MaxBase64DownloadBytes` (default 5 MB).");
         markdown.AppendLine("- `get_csv_content` caps `maxRows` at `MaxContentRowLimit` (default 100,000) and defaults to `DefaultContentRowLimit` (default 200) rows.");
         markdown.AppendLine("- `create_csv` returns a file with an auto-unique name when a collision occurs; the actual name is always reported in the result.");
         markdown.AppendLine();

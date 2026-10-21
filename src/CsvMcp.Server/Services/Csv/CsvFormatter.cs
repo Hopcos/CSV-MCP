@@ -11,12 +11,15 @@ namespace CsvMcp.Server.Services.Csv;
 /// <item>Row rendering is CPU-bound and embarrassingly parallel, so rows are grouped into chunks that are rendered
 /// concurrently with <see cref="Parallel.For(int, int, ParallelOptions, Action{int})"/> using bounded parallelism
 /// (<c>Environment.ProcessorCount</c>). Rendered lines are kept in a pre-sized array so the original row order is preserved.</item>
-/// <item>Writing is fully asynchronous: buffered <see cref="StreamWriter"/> with <see cref="StreamWriter.WriteLineAsync(ReadOnlyMemory{char}, CancellationToken)"/>.</item>
+/// <item>Writing is batched: pre-rendered lines are accumulated into buffers of about 64 KB and flushed with a small
+/// number of asynchronous <see cref="StreamWriter.WriteAsync(ReadOnlyMemory{char}, CancellationToken)"/> calls instead of
+/// one await per line, which dramatically reduces per-line overhead for large payloads.</item>
 /// </list>
 /// </summary>
 public sealed class CsvFormatter : ICsvFormatter
 {
     private const int DefaultBufferSize = 64 * 1024;
+    private const int MaxBatchChars = 64 * 1024;
 
     /// <inheritdoc/>
     public string NormalizeDelimiter(string? token) => CsvDelimiters.Normalize(token);
@@ -55,19 +58,7 @@ public sealed class CsvFormatter : ICsvFormatter
     }
 
     /// <inheritdoc/>
-    public Task WriteFileAsync(Stream destination, string[] headers, string[][] rows, string delimiter, CancellationToken cancellationToken)
-    {
-        string headerLine = RenderRow(headers, delimiter);
-        string[] renderedRows = RenderRowsInParallel(rows, delimiter, cancellationToken);
-
-        return WriteRenderedLinesAsync(destination, headerLine, renderedRows, cancellationToken);
-    }
-
-    /// <summary>
-    /// Renders all data rows into a pre-sized string array. Each row is independent, so chunks are processed
-    /// concurrently on the thread pool; array positions are written by exactly one worker, preserving row order.
-    /// </summary>
-    private string[] RenderRowsInParallel(string[][] rows, string delimiter, CancellationToken cancellationToken)
+    public string[] RenderRows(string[][] rows, string delimiter, CancellationToken cancellationToken)
     {
         if (rows.Length == 0)
         {
@@ -101,25 +92,48 @@ public sealed class CsvFormatter : ICsvFormatter
         return rendered;
     }
 
-    private static async Task WriteRenderedLinesAsync(
-        Stream destination,
-        string headerLine,
-        string[] renderedRows,
-        CancellationToken cancellationToken)
+    /// <inheritdoc/>
+    public async Task WriteFileAsync(Stream destination, string[] headers, string[][] rows, string delimiter, CancellationToken cancellationToken)
     {
-        var writer = new StreamWriter(
+        string headerLine = RenderRow(headers, delimiter);
+        string[] renderedRows = RenderRows(rows, delimiter, cancellationToken);
+
+        var lines = new string[renderedRows.Length + 1];
+        lines[0] = headerLine;
+        Array.Copy(renderedRows, 0, lines, 1, renderedRows.Length);
+
+        await WriteLinesAsync(destination, lines, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc/>
+    public async Task WriteLinesAsync(Stream destination, IReadOnlyList<string> renderedLines, CancellationToken cancellationToken)
+    {
+        using var writer = new StreamWriter(
             destination,
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
             DefaultBufferSize,
-            leaveOpen: true);
-
-        writer.NewLine = "\r\n"; // RFC 4180 requires CRLF line endings.
-
-        await writer.WriteLineAsync(headerLine.AsMemory(), cancellationToken).ConfigureAwait(false);
-
-        foreach (string line in renderedRows)
+            leaveOpen: true)
         {
-            await writer.WriteLineAsync(line.AsMemory(), cancellationToken).ConfigureAwait(false);
+            NewLine = "\r\n", // RFC 4180 requires CRLF line endings.
+        };
+
+        var batch = new StringBuilder(MaxBatchChars);
+
+        foreach (string line in renderedLines)
+        {
+            if (batch.Length > 0 && batch.Length + line.Length + 2 > MaxBatchChars)
+            {
+                await writer.WriteAsync(batch.ToString().AsMemory(), cancellationToken).ConfigureAwait(false);
+                batch.Clear();
+            }
+
+            batch.Append(line);
+            batch.Append("\r\n");
+        }
+
+        if (batch.Length > 0)
+        {
+            await writer.WriteAsync(batch.ToString().AsMemory(), cancellationToken).ConfigureAwait(false);
         }
 
         await writer.FlushAsync(cancellationToken).ConfigureAwait(false);

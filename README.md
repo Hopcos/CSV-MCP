@@ -195,6 +195,7 @@ All knobs live in `appsettings.json` under the `CsvMcp` section:
 | `MaxColumns` | `10000` | Hard cap on columns per file |
 | `MaxCellLength` | `1000000` | Hard cap on characters in a single cell |
 | `MaxFileSizeBytes` | `52428800` (50 MB) | Hard cap on a committed file's size |
+| `MaxAppendBytes` | `1000000` (≈1 MB) | Hard cap on the rendered bytes a single `append_csv_rows` call may add |
 | `DefaultContentRowLimit` | `200` | `get_csv_content` default page size |
 | `MaxContentRowLimit` | `100000` | `get_csv_content` hard page-size cap |
 | `MaxBase64DownloadBytes` | `5242880` (5 MB) | Cap for `includeBase64` downloads |
@@ -283,12 +284,18 @@ Example response (content text, pretty-printed here):
 ### append_csv_rows
 
 Appends rows to an existing file. Each row must have exactly as many cells as the file's
-columns. Appends are serialized per file (safe under concurrent calls).
+columns. Appends are serialized per file (safe under concurrent calls). Internally the rows are
+**rendered in parallel** across worker threads and written with a **single batched write**, so
+large payloads append fast.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `fileId` | `string` | yes | Existing file's ID |
 | `rows` | `string[][]` | yes | Rows to append, same shape as `create_csv` |
+
+One call may add at most `MaxAppendBytes` of rendered content (default 1,000,000 bytes ≈ 1 MB).
+When the dataset is bigger, split it across several `append_csv_rows` calls — if the cap is hit,
+the error message reports the actual payload size.
 
 ### list_csv_files
 

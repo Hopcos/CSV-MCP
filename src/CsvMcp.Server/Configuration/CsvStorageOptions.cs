@@ -39,6 +39,13 @@ public sealed class CsvStorageOptions
     /// <summary>Maximum allowed size of a committed CSV file in bytes.</summary>
     public long MaxFileSizeBytes { get; set; } = 50 * 1024 * 1024;
 
+    /// <summary>
+    /// Maximum rendered size in bytes (escaped payload incl. CRLF line endings) that a single
+    /// <c>append_csv_rows</c> call may add. Defaults to 1,000,000 bytes (≈ 1 MB); larger payloads
+    /// must be split into several append calls.
+    /// </summary>
+    public long MaxAppendBytes { get; set; } = 1_000_000;
+
     /// <summary>Default number of rows returned by <c>get_csv_content</c> when <c>maxRows</c> is not provided.</summary>
     public int DefaultContentRowLimit { get; set; } = 200;
 

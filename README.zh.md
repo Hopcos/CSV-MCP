@@ -189,6 +189,7 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke-test.ps1
 | `MaxColumns` | `10000` | 单个文件列数上限 |
 | `MaxCellLength` | `1000000` | 单个单元格字符数上限 |
 | `MaxFileSizeBytes` | `52428800`（50 MB） | 已提交文件大小上限 |
+| `MaxAppendBytes` | `1000000`（约 1 MB） | 单次 `append_csv_rows` 调用可追加的渲染后字节数上限 |
 | `DefaultContentRowLimit` | `200` | `get_csv_content` 默认分页大小 |
 | `MaxContentRowLimit` | `100000` | `get_csv_content` 分页大小硬上限 |
 | `MaxBase64DownloadBytes` | `5242880`（5 MB） | `includeBase64` 下载的大小上限 |
@@ -275,12 +276,15 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke-test.ps1
 ### append_csv_rows
 
 向已有文件追加行。每行的单元格数必须与文件列数完全一致。对同一文件的追加按文件串行执行
-（并发调用也安全）。
+（并发调用也安全）。内部实现为**并行渲染**（跨工作线程）+ **单次批量写入**，大流量追加也很快。
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `fileId` | `string` | 是 | 已有文件的 ID |
 | `rows` | `string[][]` | 是 | 要追加的行，结构与 `create_csv` 相同 |
+
+单次调用最多可追加 `MaxAppendBytes` 的渲染后内容（默认 1,000,000 字节，约 1 MB）。数据更大时请拆成多次
+`append_csv_rows` 调用——超限时错误信息会给出实际载荷大小。
 
 ### list_csv_files
 

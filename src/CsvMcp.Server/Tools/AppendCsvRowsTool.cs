@@ -27,7 +27,7 @@ public sealed class AppendCsvRowsTool
     /// Returns the updated file metadata, including the new row count and size.
     /// </summary>
     [McpServerTool(Name = "append_csv_rows", Title = "Append rows to CSV file")]
-    [Description("Appends data rows to an existing CSV file (identified by fileId) and returns the updated metadata. Each appended row must have exactly as many cells as the file has columns.")]
+    [Description("Appends data rows to an existing CSV file (identified by fileId) and returns the updated metadata. Each appended row must have exactly as many cells as the file has columns. One call may add at most MaxAppendBytes of rendered content (default 1,000,000 bytes); for larger datasets split the rows across several append calls.")]
     public async Task<string> AppendCsvRowsAsync(
         [Description("File ID of the target CSV file (returned by create_csv or list_csv_files).")]
         string fileId,

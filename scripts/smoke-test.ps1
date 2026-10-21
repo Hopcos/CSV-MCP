@@ -207,6 +207,22 @@ $appendResult = Invoke-ToolWithParams "append_csv_rows" @{
 Assert-True ($appendResult.ok -eq $true) "append_csv_rows succeeds"
 Assert-True ($appendResult.data.rowCount -eq 5) "rowCount grows to 5 after append"
 
+# Large (but legal) batched append: 5,000 rows x 5 cols exercises the parallel-render + single-write path.
+$bigRows = @()
+foreach ($i in 1..5000) {
+    $bigRows += ,@("r$i", "x", "x", "x", "x")
+}
+$bigAppend = Invoke-ToolWithParams "append_csv_rows" @{ fileId = $fileId; rows = $bigRows }
+Assert-True ($bigAppend.ok -eq $true) "append of 5,000 rows succeeds"
+Assert-True ($bigAppend.data.rowCount -eq 5005) "rowCount grows to 5005 after batched append"
+
+# Over-cap append: one row of 5 cells x 250,000 chars (~1.25 MB rendered) must be rejected by MaxAppendBytes.
+$hugeRow = @()
+foreach ($i in 1..5) { $hugeRow += ('x' * 250000) }
+$overAppend = Invoke-ToolWithParams "append_csv_rows" @{ fileId = $fileId; rows = ,$hugeRow }
+Assert-True ($overAppend.ok -eq $false) "append over MaxAppendBytes is rejected"
+Assert-True ($overAppend.error.Contains("MaxAppendBytes")) "rejection message names MaxAppendBytes"
+
 # ---------------------------------------------------------------------------
 Write-Host "[9/11] get_csv_download with inline base64"
 # ---------------------------------------------------------------------------

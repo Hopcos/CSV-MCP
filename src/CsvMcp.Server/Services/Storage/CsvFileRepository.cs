@@ -145,23 +145,53 @@ public sealed class CsvFileRepository : ICsvFileRepository
 
             ValidateRowShapes(sidecar.ColumnCount, rows);
 
-            string delimiter = sidecar.Delimiter is { Length: 1 } single ? single : ",";
-
-            // Render first so the projected size can be validated before the file is touched.
-            string[] renderedLines = new string[rows.Length];
-            long projectedBytes = sidecar.SizeBytes;
-            for (int i = 0; i < rows.Length; i++)
+            if (rows.Length == 0)
             {
-                renderedLines[i] = _formatter.RenderRow(rows[i], delimiter);
-                projectedBytes += Encoding.UTF8.GetByteCount(renderedLines[i]) + 2; // + CRLF
+                return sidecar.ToMetadata();
             }
 
+            string delimiter = sidecar.Delimiter is { Length: 1 } single ? single : ",";
+
+            // Fast rejection before any rendering work: the completely unescaped payload (cells + delimiters + CRLF)
+            // is a strict lower bound of the rendered bytes (escaping never shrinks a cell), so exceeding the
+            // per-append budget here guarantees the rendered payload exceeds it too.
+            long lowerBoundBytes = 0;
+            foreach (string[] row in rows)
+            {
+                foreach (string? cell in row)
+                {
+                    lowerBoundBytes += cell?.Length ?? 0;
+                }
+
+                lowerBoundBytes += (row.Length - 1) + 2; // one delimiter per gap + CRLF
+            }
+
+            if (lowerBoundBytes > _options.MaxAppendBytes)
+            {
+                throw new CsvValidationException(
+                    $"Appending {rows.Length} rows would add at least {lowerBoundBytes} bytes, exceeding the maximum of {_options.MaxAppendBytes} bytes per append call (MaxAppendBytes). Split the data into smaller append_csv_rows calls.");
+            }
+
+            // Render all rows in parallel. The per-file size check is based on the true escaped payload
+            // (including CRLF), so the file is only touched after validation passes.
+            string[] renderedLines = _formatter.RenderRows(rows, delimiter, cancellationToken);
+            string payload = string.Join("\r\n", renderedLines) + "\r\n";
+
+            long appendBytes = Encoding.UTF8.GetByteCount(payload);
+            if (appendBytes > _options.MaxAppendBytes)
+            {
+                throw new CsvValidationException(
+                    $"Appending {rows.Length} rows would add about {appendBytes} bytes, exceeding the maximum of {_options.MaxAppendBytes} bytes per append call (MaxAppendBytes). Split the data into smaller append_csv_rows calls.");
+            }
+
+            long projectedBytes = sidecar.SizeBytes + appendBytes;
             if (projectedBytes > _options.MaxFileSizeBytes)
             {
                 throw new CsvValidationException(
                     $"Appending {rows.Length} rows would grow the file to about {projectedBytes} bytes, exceeding the maximum allowed size of {_options.MaxFileSizeBytes} bytes.");
             }
 
+            // Single batched write: one WriteAsync for the whole (bounded) payload avoids per-line awaits.
             await using (var appendStream = new FileStream(
                 committedPath,
                 FileMode.Append,
@@ -169,21 +199,16 @@ public sealed class CsvFileRepository : ICsvFileRepository
                 FileShare.Read,
                 DefaultIoBufferSize,
                 FileOptions.Asynchronous))
+            await using (var writer = new StreamWriter(
+                appendStream,
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                DefaultIoBufferSize,
+                leaveOpen: true)
             {
-                var writer = new StreamWriter(
-                    appendStream,
-                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-                    DefaultIoBufferSize,
-                    leaveOpen: true)
-                {
-                    NewLine = "\r\n", // RFC 4180
-                };
-
-                foreach (string line in renderedLines)
-                {
-                    await writer.WriteLineAsync(line.AsMemory(), cancellationToken).ConfigureAwait(false);
-                }
-
+                NewLine = "\r\n", // RFC 4180
+            })
+            {
+                await writer.WriteAsync(payload.AsMemory(), cancellationToken).ConfigureAwait(false);
                 await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
 
